@@ -1,6 +1,10 @@
 <Project>
-  <!-- Apply only to SDK-style .NET projects -->
+  <!-- Only apply to SDK-style .NET projects -->
   <PropertyGroup Condition="'$(UsingMicrosoftNETSdk)' == 'true'">
+    <!-- If TFM is empty, set a sane default -->
+    <TargetFramework Condition="'$(TargetFramework)' == '' and '$(TargetFrameworks)' == ''">net8.0</TargetFramework>
+
+    <!-- Your earlier trimming override -->
     <PublishTrimmed>false</PublishTrimmed>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
