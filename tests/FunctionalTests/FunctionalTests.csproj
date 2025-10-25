@@ -17,10 +17,12 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>     
+    <PackageReference Include="xunit.runner.visualstudio"
+                      PrivateAssets="all"
+                      IncludeAssets="runtime;build;native;contentfiles;analyzers" />
+    <PackageReference Include="xunit.runner.console"
+                      PrivateAssets="all"
+                      IncludeAssets="runtime;build;native;contentfiles;analyzers" />    
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <DotNetCliToolReference Include="dotnet-xunit" Version="2.3.1" />
   </ItemGroup>
