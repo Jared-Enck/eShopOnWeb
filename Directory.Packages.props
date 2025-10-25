@@ -6,6 +6,8 @@
     <SystemExtensionVersion>8.0.1</SystemExtensionVersion>
     <EntityFramworkCoreVersion>8.0.0</EntityFramworkCoreVersion>
     <VSCodeGeneratorVersion>8.0.0</VSCodeGeneratorVersion>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Ardalis.ApiEndpoints" Version="4.1.0" />
