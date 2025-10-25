@@ -27,7 +27,9 @@ jobs:
         
     - name: Clear NuGet cache
       run: dotnet nuget locals all --clear
-
+      
+    - name: Restore
+      run: dotnet restore ./eShopOnWeb.sln
     #Build/Test/Publish the .net project
     - name: Build with dotnet
       run: dotnet build ./eShopOnWeb.sln --configuration Release -p:PublishTrimmed=false
