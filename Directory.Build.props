@@ -1,5 +1,6 @@
 <Project>
-  <PropertyGroup>
+  <!-- Apply only to SDK-style .NET projects -->
+  <PropertyGroup Condition="'$(UsingMicrosoftNETSdk)' == 'true'">
     <PublishTrimmed>false</PublishTrimmed>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
