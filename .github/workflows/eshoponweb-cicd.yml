@@ -146,7 +146,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
   
-      # 3) Validate the Bicep (shows the real error message)
+          # Validate the Bicep (prints the real error)
       - name: Validate Bicep
         uses: Azure/cli@v2
         with:
@@ -159,7 +159,7 @@ jobs:
               --parameters webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
   
-      # 4) Deploy the Bicep (only after successful validation)
+      # Deploy only if validation succeeded
       - name: Deploy Bicep
         uses: Azure/cli@v2
         with:
