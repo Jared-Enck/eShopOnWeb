@@ -37,6 +37,31 @@ jobs:
     - name: Check BlazorAdmin project TFM
       run: dotnet msbuild src/BlazorAdmin/BlazorAdmin.csproj -getProperty:TargetFramework
 
+    - name: List solution projects (debug)
+      run: dotnet sln eShopOnWeb.sln list
+    
+    # Remove docker-compose (non-SDK) from CI restore/build to avoid TFM issues
+    - name: Remove docker-compose from solution (CI-only)
+      run: |
+        if dotnet sln eShopOnWeb.sln list | grep -q "docker-compose.dcproj"; then
+          dotnet sln eShopOnWeb.sln remove docker-compose.dcproj
+        fi
+        
+    - name: Check for any TargetFramework set globally
+      run: printenv | sort | grep -i target || true
+    
+    - name: Show any TFM declarations in repo (grep)
+      run: git grep -n "<TargetFramework" || true
+    
+    - name: Echo TFM for each project
+      shell: bash
+      run: |
+        set -e
+        for f in $(git ls-files '*.csproj'); do
+          echo "== $f =="
+          dotnet msbuild "$f" -nologo -getProperty:TargetFramework -getProperty:TargetFrameworks
+        done
+
     - name: Restore
       run: dotnet restore ./eShopOnWeb.sln
     #Build/Test/Publish the .net project
