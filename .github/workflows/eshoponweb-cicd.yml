@@ -30,14 +30,17 @@ jobs:
 
     #Build/Test/Publish the .net project
     - name: Build with dotnet
-      run: dotnet build ./eShopOnWeb.sln --configuration Release
+      run: dotnet build ./eShopOnWeb.sln --configuration Release -p:PublishTrimmed=false
+    
     - name: Test with dotnet
-      run: dotnet test ./eShopOnWeb.sln --configuration Release
+      run: dotnet test ./eShopOnWeb.sln --configuration Release -p:PublishTrimmed=false
+
     - name: dotnet publish
       run: |
-        dotnet publish ./src/Web/Web.csproj -c Release -o ${{env.DOTNET_ROOT}}/myapp
+        dotnet publish ./src/Web/Web.csproj -c Release -p:PublishTrimmed=false -o ${{env.DOTNET_ROOT}}/myapp
         cd ${{env.DOTNET_ROOT}}/myapp
         zip -r ../app.zip .
+
     # upload the published website code artifacts
     - name: Upload artifact for deployment job
       uses: actions/upload-artifact@v4
