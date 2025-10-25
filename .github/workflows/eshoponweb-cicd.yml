@@ -28,6 +28,15 @@ jobs:
     - name: Clear NuGet cache
       run: dotnet nuget locals all --clear
       
+    - name: Show env (check for TARGETFRAMEWORK env var)
+      run: printenv | sort | grep -i target || true
+
+    - name: Check Web project TFM
+      run: dotnet msbuild src/Web/Web.csproj -getProperty:TargetFramework
+    
+    - name: Check BlazorAdmin project TFM
+      run: dotnet msbuild src/BlazorAdmin/BlazorAdmin.csproj -getProperty:TargetFramework
+
     - name: Restore
       run: dotnet restore ./eShopOnWeb.sln
     #Build/Test/Publish the .net project
