@@ -67,17 +67,28 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # 5) Validate + deploy the JSON (no Bicep dependency here)
-      - name: Validate & Deploy ARM JSON
-        uses: azure/arm-deploy@v2
+      - name: Validate & Deploy with Az PowerShell (JSON)
+        uses: azure/powershell@v2
         with:
-          scope: resourcegroup
-          subscriptionId: ${{ env.SUBSCRIPTION-ID }}
-          resourceGroupName: ${{ env.RESOURCE-GROUP }}
-          template: arm-template/webapp.json
-          parameters: |
-            webAppName=${{ env.WEBAPP-NAME }}
-            location=${{ env.LOCATION }}
-          deploymentName: eshoponweb-${{ github.run_id }}
+          azPSVersion: "latest"
+          inlineScript: |
+            $ErrorActionPreference = "Stop"
+            Select-AzSubscription -SubscriptionId "${{ env.SUBSCRIPTION-ID }}"
+            # Validation prints concrete errors (name taken, missing param, provider, etc.)
+            Test-AzResourceGroupDeployment `
+              -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
+              -TemplateFile "arm-template/webapp.json" `
+              -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
+              -Verbose
+            # Create deployment
+            New-AzResourceGroupDeployment `
+              -Name "eshoponweb-${{ github.run_id }}" `
+              -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
+              -TemplateFile "arm-template/webapp.json" `
+              -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
+              -Mode Incremental `
+              -Verbose
+
 
 
       # 6) Push the ZIP to the Web App
