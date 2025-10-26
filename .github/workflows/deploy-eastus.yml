@@ -16,9 +16,9 @@ jobs:
       - name: Download .net-app (zip) from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: eshoponweb-cicd.yml         # <-- your build workflow file name
+          workflow: eshoponweb-cicd.yml
           workflow_conclusion: success
-          name: .net-app                        # <-- must match upload name
+          name: .net-app
           path: .net-app
           branch: main
 
@@ -27,17 +27,16 @@ jobs:
         with:
           workflow: eshoponweb-cicd.yml
           workflow_conclusion: success
-          name: bicep-template                   # <-- must match upload name
+          name: bicep-template
           path: bicep-template
           branch: main
 
-      # (Optional) sanity check
       - name: Verify artifacts
         run: |
           ls -al .net-app || true
           ls -al bicep-template || true
 
-      # 2) Install standalone Bicep CLI (no az CLI, no Docker)
+      # 2) Install standalone Bicep CLI (no az CLI dependency)
       - name: Install Bicep CLI (standalone)
         shell: bash
         run: |
@@ -57,39 +56,64 @@ jobs:
           mkdir -p arm-template
           bicep build bicep-template/webapp.bicep --outfile arm-template/webapp.json
           ls -al arm-template
-          head -n 20 arm-template/webapp.json
+          head -n 30 arm-template/webapp.json
 
-
-      # 4) Azure login
-      - name: Azure Login (for Az PowerShell)
-        uses: azure/login@v2
+      # 4) Ensure required resource providers are registered (safe if already registered)
+      - name: Ensure providers registered (Web/Insights)
+        uses: azure/cli@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-          enable-AzPSSession: true   # <-- shares the login with azure/powershell
+          inlineScript: |
+            set -euo pipefail
+            az provider register --namespace Microsoft.Web --wait
+            az provider register --namespace Microsoft.Insights --wait
 
-      # 5) Validate + deploy the JSON (no Bicep dependency here)
+      # 5) Check web app name availability; if taken, pick a unique one and export to env
+      - name: Check Web App name & pick unique if needed
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            sub="${{ env.SUBSCRIPTION-ID }}"
+            name="${{ env.WEBAPP-NAME }}"
+            echo "Checking global availability for: $name"
+            resp=$(az rest \
+              --method post \
+              --url "https://management.azure.com/subscriptions/$sub/providers/Microsoft.Web/checkNameAvailability?api-version=2022-09-01" \
+              --body "{\"name\":\"$name\",\"type\":\"Microsoft.Web/sites\"}" \
+              --output json)
+            echo "$resp"
+            if echo "$resp" | grep -q '"nameAvailable":\s*true'; then
+              echo "Name available."
+            else
+              echo "Name not available. Generating a unique one..."
+              suffix="${GITHUB_RUN_ID}${GITHUB_RUN_ATTEMPT}$(date +%s | tail -c 5)"
+              newname="eshop-${suffix}"
+              echo "Using WEBAPP-NAME=$newname"
+              echo "WEBAPP-NAME=$newname" >> "$GITHUB_ENV"
+            fi
+
+      # 6) Validate & Deploy ARM JSON with Az PowerShell (prints inner errors if any)
       - name: Validate & Deploy with Az PowerShell (show inner errors)
         uses: azure/powershell@v2
         with:
           azPSVersion: latest
           inlineScript: |
             $ErrorActionPreference = "Stop"
-      
-            # Login explicitly using AZURE_CREDENTIALS (keeps this step self-contained)
-            $sp = ($env:AZURE_CREDENTIALS | ConvertFrom-Json)
-            $sec = ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force
+
+            # Explicit SP login from AZURE_CREDENTIALS (keeps this step self-contained)
+            $sp   = ($env:AZURE_CREDENTIALS | ConvertFrom-Json)
+            $sec  = ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force
             $cred = New-Object System.Management.Automation.PSCredential($sp.clientId, $sec)
             Connect-AzAccount -ServicePrincipal -Tenant $sp.tenantId -Credential $cred | Out-Null
             Select-AzSubscription -SubscriptionId "${{ env.SUBSCRIPTION-ID }}"
-      
-            $rg   = "${{ env.RESOURCE-GROUP }}"
-            $name = "eshoponweb-${{ github.run_id }}"
-            $tmpl = "arm-template/webapp.json"
+
+            $rg     = "${{ env.RESOURCE-GROUP }}"
+            $name   = "eshoponweb-${{ github.run_id }}"
+            $tmpl   = "arm-template/webapp.json"
             $params = @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" }
-      
-            Write-Host ">>> Parameters:"
-            $params
-      
+
+            Write-Host ">>> Parameters:"; $params
+
             Write-Host ">>> Validating template..."
             try {
               Test-AzResourceGroupDeployment `
@@ -98,15 +122,14 @@ jobs:
                 -TemplateParameterObject $params `
                 -ErrorAction Stop -Verbose
               Write-Host ">>> Validation passed."
-            }
-            catch {
+            } catch {
               Write-Host "=== VALIDATION ERROR (raw) ==="
               $_ | Format-List -Force
               Write-Host "=== VALIDATION ERROR (resolved) ==="
               Resolve-AzError -Last | Format-List -Force
               throw
             }
-      
+
             Write-Host ">>> Creating deployment $name ..."
             try {
               New-AzResourceGroupDeployment `
@@ -117,18 +140,16 @@ jobs:
                 -Mode Incremental `
                 -ErrorAction Stop -Verbose
               Write-Host ">>> Deployment succeeded."
-            }
-            catch {
+            } catch {
               Write-Host "=== DEPLOYMENT ERROR (raw) ==="
               $_ | Format-List -Force
               Write-Host "=== DEPLOYMENT ERROR (resolved) ==="
               Resolve-AzError -Last | Format-List -Force
-      
+
               Write-Host "=== DEPLOYMENT OPERATIONS (full status messages) ==="
               try {
                 Get-AzResourceGroupDeploymentOperation -ResourceGroupName $rg -DeploymentName $name |
                   ForEach-Object {
-                    # Many ARM errors are JSON; emit them verbosely
                     if ($_.Properties.StatusMessage) {
                       try {
                         ($_.Properties.StatusMessage | ConvertTo-Json -Depth 100)
@@ -140,17 +161,19 @@ jobs:
               } catch {
                 Write-Host "(Could not fetch operations: $($_.Exception.Message))"
               }
-      
+
               throw
             }
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
 
-
-      # 6) Push the ZIP to the Web App
+      # 7) Publish the ZIP to the Web App (uses possibly-updated WEBAPP-NAME)
       - name: Publish Website to WebApp
         uses: Azure/webapps-deploy@v3
         with:
+          app-name: ${{ env.WEBAPP-NAME }}
+          package: .net-app/app.zip
+          type: zip
           app-name: ${{ env.WEBAPP-NAME }}
           package: .net-app/app.zip
           type: zip
