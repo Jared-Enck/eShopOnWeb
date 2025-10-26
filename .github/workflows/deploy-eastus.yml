@@ -61,10 +61,11 @@ jobs:
 
 
       # 4) Azure login
-      - name: Azure Login
+      - name: Azure Login (for Az PowerShell)
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+          enable-AzPSSession: true   # <-- shares the login with azure/powershell
 
       # 5) Validate + deploy the JSON (no Bicep dependency here)
       - name: Validate & Deploy with Az PowerShell (JSON)
