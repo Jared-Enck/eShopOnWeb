@@ -55,9 +55,10 @@ jobs:
         run: |
           set -e
           mkdir -p arm-template
-          bicep build bicep-template/webapp.bicep --out arm-template/webapp.json
+          bicep build bicep-template/webapp.bicep --outfile arm-template/webapp.json
           ls -al arm-template
           head -n 20 arm-template/webapp.json
+
 
       # 4) Azure login
       - name: Azure Login
