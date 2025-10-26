@@ -98,7 +98,7 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-  
+
       # Guard: no .bicep allowed in this job
       - name: Assert no .bicep is referenced in this job
         shell: bash
@@ -108,7 +108,7 @@ jobs:
           if printenv | grep -q '\.bicep'; then
             echo "A .bicep reference found in environment variables. Fix env to use JSON."; exit 1
           fi
-  
+
       - name: Debug template path
         shell: bash
         run: |
@@ -116,24 +116,27 @@ jobs:
           ls -al arm-template
           head -n 30 arm-template/webapp.json
           file arm-template/webapp.json
-  
+
       - name: Validate ARM template (JSON)
         uses: azure/cli@v2
         with:
           inlineScript: |
             set -euo pipefail
+            # install bicep just in case the container tries to use it
+            az bicep install --upgrade || true
             az deployment group validate \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
               --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-  
+
       - name: Deploy ARM template (JSON)
         uses: azure/cli@v2
         with:
           inlineScript: |
             set -euo pipefail
+            az bicep install --upgrade || true
             az deployment group create \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
@@ -142,12 +145,13 @@ jobs:
               --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-  
+
       - name: Publish Website to WebApp
         uses: azure/cli@v2
         with:
           inlineScript: |
             set -euo pipefail
+            az bicep install --upgrade || true
             az webapp deploy \
               --name ${{ env.WEBAPP-NAME }} \
               --resource-group ${{ env.RESOURCE-GROUP }} \
