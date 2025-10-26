@@ -71,17 +71,26 @@ jobs:
       - name: Validate & Deploy with Az PowerShell (JSON)
         uses: azure/powershell@v2
         with:
-          azPSVersion: "latest"
+          azPSVersion: latest
           inlineScript: |
             $ErrorActionPreference = "Stop"
+      
+            # Explicit SP login using AZURE_CREDENTIALS JSON
+            $sp = ($env:AZURE_CREDENTIALS | ConvertFrom-Json)
+            $sec = ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force
+            $cred = New-Object System.Management.Automation.PSCredential($sp.clientId, $sec)
+            Connect-AzAccount -ServicePrincipal -Tenant $sp.tenantId -Credential $cred | Out-Null
+      
             Select-AzSubscription -SubscriptionId "${{ env.SUBSCRIPTION-ID }}"
-            # Validation prints concrete errors (name taken, missing param, provider, etc.)
+      
+            # Validation
             Test-AzResourceGroupDeployment `
               -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
               -TemplateFile "arm-template/webapp.json" `
               -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
               -Verbose
-            # Create deployment
+      
+            # Deployment
             New-AzResourceGroupDeployment `
               -Name "eshoponweb-${{ github.run_id }}" `
               -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
@@ -89,7 +98,8 @@ jobs:
               -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
               -Mode Incremental `
               -Verbose
-
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
 
 
       # 6) Push the ZIP to the Web App
