@@ -146,38 +146,38 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
           
-      - name: Install Bicep CLI
-        uses: Azure/cli@v2
-        with:
-          inlineScript: |
-            az bicep install --upgrade
-            az bicep version
-
       - name: Validate & Deploy Bicep
-        uses: Azure/cli@v2
+        uses: azure/cli@v2
         with:
+          azcliversion: 2.77.0
           inlineScript: |
-            set -e
-            az version
+            set -euxo pipefail
+      
+            echo "Installing Bicep CLI..."
             az bicep install --upgrade
             az bicep version
       
-            # Validate (prints clear error if something's wrong)
+            echo "Build Bicep -> ARM JSON (so subsequent commands don't need Bicep)"
+            az bicep build \
+              --file bicep-template/webapp.bicep \
+              --out  bicep-template/webapp.json
+      
+            echo "Validate deployment"
             az deployment group validate \
-              --subscription ${{ env.SUBSCRIPTION-ID }} \
-              --resource-group ${{ env.RESOURCE-GROUP }} \
-              --template-file bicep-template/webapp.bicep \
-              --parameters webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
+              --subscription  "${{ env.SUBSCRIPTION-ID }}" \
+              --resource-group "${{ env.RESOURCE-GROUP }}" \
+              --template-file  bicep-template/webapp.json \
+              --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
       
-            # Deploy
+            echo "Create deployment"
             az deployment group create \
-              --subscription ${{ env.SUBSCRIPTION-ID }} \
-              --resource-group ${{ env.RESOURCE-GROUP }} \
+              --subscription  "${{ env.SUBSCRIPTION-ID }}" \
+              --resource-group "${{ env.RESOURCE-GROUP }}" \
               --name eshoponweb-${{ github.run_id }} \
               --mode Incremental \
-              --template-file bicep-template/webapp.bicep \
-              --parameters webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
+              --template-file  bicep-template/webapp.json \
+              --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
 
   
