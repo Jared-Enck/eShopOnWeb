@@ -68,43 +68,84 @@ jobs:
           enable-AzPSSession: true   # <-- shares the login with azure/powershell
 
       # 5) Validate + deploy the JSON (no Bicep dependency here)
-      - name: Validate & Deploy with Az PowerShell (JSON)
+      - name: Validate & Deploy with Az PowerShell (show inner errors)
         uses: azure/powershell@v2
         with:
           azPSVersion: latest
           inlineScript: |
             $ErrorActionPreference = "Stop"
       
-            # Login using AZURE_CREDENTIALS JSON
+            # Login explicitly using AZURE_CREDENTIALS (keeps this step self-contained)
             $sp = ($env:AZURE_CREDENTIALS | ConvertFrom-Json)
             $sec = ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force
             $cred = New-Object System.Management.Automation.PSCredential($sp.clientId, $sec)
             Connect-AzAccount -ServicePrincipal -Tenant $sp.tenantId -Credential $cred | Out-Null
             Select-AzSubscription -SubscriptionId "${{ env.SUBSCRIPTION-ID }}"
       
+            $rg   = "${{ env.RESOURCE-GROUP }}"
+            $name = "eshoponweb-${{ github.run_id }}"
+            $tmpl = "arm-template/webapp.json"
+            $params = @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" }
+      
+            Write-Host ">>> Parameters:"
+            $params
+      
+            Write-Host ">>> Validating template..."
             try {
               Test-AzResourceGroupDeployment `
-                -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
-                -TemplateFile "arm-template/webapp.json" `
-                -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
-                -Verbose -ErrorAction Stop
-            } catch {
-              Write-Host "=== RAW ERROR ==="
+                -ResourceGroupName $rg `
+                -TemplateFile $tmpl `
+                -TemplateParameterObject $params `
+                -ErrorAction Stop -Verbose
+              Write-Host ">>> Validation passed."
+            }
+            catch {
+              Write-Host "=== VALIDATION ERROR (raw) ==="
               $_ | Format-List -Force
-              Write-Host "=== RESOLVED (Resolve-AzError) ==="
+              Write-Host "=== VALIDATION ERROR (resolved) ==="
               Resolve-AzError -Last | Format-List -Force
               throw
             }
       
-            New-AzResourceGroupDeployment `
-              -Name "eshoponweb-${{ github.run_id }}" `
-              -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
-              -TemplateFile "arm-template/webapp.json" `
-              -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
-              -Mode Incremental `
-              -Verbose
+            Write-Host ">>> Creating deployment $name ..."
+            try {
+              New-AzResourceGroupDeployment `
+                -Name $name `
+                -ResourceGroupName $rg `
+                -TemplateFile $tmpl `
+                -TemplateParameterObject $params `
+                -Mode Incremental `
+                -ErrorAction Stop -Verbose
+              Write-Host ">>> Deployment succeeded."
+            }
+            catch {
+              Write-Host "=== DEPLOYMENT ERROR (raw) ==="
+              $_ | Format-List -Force
+              Write-Host "=== DEPLOYMENT ERROR (resolved) ==="
+              Resolve-AzError -Last | Format-List -Force
+      
+              Write-Host "=== DEPLOYMENT OPERATIONS (full status messages) ==="
+              try {
+                Get-AzResourceGroupDeploymentOperation -ResourceGroupName $rg -DeploymentName $name |
+                  ForEach-Object {
+                    # Many ARM errors are JSON; emit them verbosely
+                    if ($_.Properties.StatusMessage) {
+                      try {
+                        ($_.Properties.StatusMessage | ConvertTo-Json -Depth 100)
+                      } catch {
+                        $_.Properties.StatusMessage | Out-String
+                      }
+                    }
+                  }
+              } catch {
+                Write-Host "(Could not fetch operations: $($_.Exception.Message))"
+              }
+      
+              throw
+            }
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+
 
       # 6) Push the ZIP to the Web App
       - name: Publish Website to WebApp
