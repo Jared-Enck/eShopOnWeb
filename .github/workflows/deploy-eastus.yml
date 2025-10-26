@@ -1,4 +1,4 @@
-name: Deploy EastUS (JSON only)
+name: Deploy EastUS (from latest successful build)
 
 on: workflow_dispatch
 
@@ -12,24 +12,41 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Download published app
-        uses: actions/download-artifact@v4
+      # ⬇️ Option B: download artifacts from another workflow's latest successful run
+      # Use the *file name* of your build workflow for best reliability.
+      - name: Download .net-app (zip) from latest successful build
+        uses: dawidd6/action-download-artifact@v6
         with:
-          name: .net-app
+          workflow: eshoponweb-cicd.yml     # <-- OR the exact file name of your build workflow
+          workflow_conclusion: success
+          name: .net-app                    # <-- must match the upload name in the build workflow
           path: .net-app
+          branch: main
 
-      - name: Download ARM template
-        uses: actions/download-artifact@v4
+      - name: Download ARM template (JSON) from latest successful build
+        uses: dawidd6/action-download-artifact@v6
         with:
-          name: arm-template
+          workflow: eshoponweb-cicd.yml     # <-- same as above
+          workflow_conclusion: success
+          name: arm-template                 # <-- must match the upload name
           path: arm-template
+          branch: main
 
+      # (Optional) quick sanity check
+      - name: Verify artifacts
+        run: |
+          ls -al .net-app || true
+          ls -al arm-template || true
+          file arm-template/webapp.json || true
+          head -n 20 arm-template/webapp.json || true
+
+      # Azure login (same subscription as your env)
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Deploy JSON with arm-deploy (no CLI container → no Bicep)
+      # Deploy the JSON (no Bicep, no CLI needed)
       - name: Validate & Deploy ARM JSON
         uses: azure/arm-deploy@v2
         with:
@@ -43,7 +60,7 @@ jobs:
           failOnStdErr: false
           additionalArguments: --only-show-errors
 
-      # Push ZIP using the dedicated action (also not the CLI container)
+      # Push the ZIP to App Service
       - name: Publish Website to WebApp
         uses: Azure/webapps-deploy@v3
         with:
