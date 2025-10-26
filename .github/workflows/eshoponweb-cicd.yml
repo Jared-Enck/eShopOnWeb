@@ -82,27 +82,35 @@ jobs:
     environment:
       name: Development
     steps:
-      # 1) Download artifacts
       - name: Download published app
         uses: actions/download-artifact@v4
         with:
           name: .net-app
           path: .net-app
-
+  
       - name: Download ARM template
         uses: actions/download-artifact@v4
         with:
           name: arm-template
           path: arm-template
-
-      # 2) Login to Azure
+  
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+  
+      # Optional: install bicep anyway (harmless) so even if a .bicep sneaks in, it won't fail.
+      - name: (Optional) Install Bicep
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az bicep install --upgrade
+            az bicep version
+            
+      - name: Debug template path
+        run: ls -al arm-template && head -n 20 arm-template/webapp.json
 
-      # 3) Validate ARM JSON (no Bicep needed here)
-      - name: Validate ARM template
+      - name: Validate ARM template (JSON)
         uses: azure/cli@v2
         with:
           inlineScript: |
@@ -113,9 +121,8 @@ jobs:
               --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-
-      # 4) Deploy ARM JSON
-      - name: Deploy ARM template
+  
+      - name: Deploy ARM template (JSON)
         uses: azure/cli@v2
         with:
           inlineScript: |
@@ -128,8 +135,7 @@ jobs:
               --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-
-      # 5) Deploy the ZIP to App Service
+  
       - name: Publish Website to WebApp
         uses: azure/cli@v2
         with:
