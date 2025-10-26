@@ -146,18 +146,19 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
           
-      - name: Validate & Deploy Bicep
+      - name: Validate & Deploy Bicep (single step)
         uses: azure/cli@v2
         with:
           azcliversion: 2.77.0
           inlineScript: |
             set -euxo pipefail
       
-            echo "Installing Bicep CLI..."
+            echo "Install Bicep CLI and fix PATH"
             az bicep install --upgrade
+            export PATH="$HOME/.azure/bin:$PATH"
             az bicep version
       
-            echo "Build Bicep -> ARM JSON (so subsequent commands don't need Bicep)"
+            echo "Build Bicep -> ARM JSON (avoid relying on Bicep in later commands)"
             az bicep build \
               --file bicep-template/webapp.bicep \
               --out  bicep-template/webapp.json
@@ -179,6 +180,7 @@ jobs:
               --template-file  bicep-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
+
 
   
       # 5) Publish the zip to the created App Service
