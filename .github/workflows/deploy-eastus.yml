@@ -17,7 +17,7 @@ jobs:
       - name: Download .net-app (zip) from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: deploy-eastus.yml      # << update if your build workflow file is named differently
+          workflow: eshoponweb-cicd.yml      # << update if your build workflow file is named differently
           workflow_conclusion: success
           name: .net-app                     # must match the upload name in the build workflow
           path: .net-app
@@ -26,7 +26,7 @@ jobs:
       - name: Download Bicep artifact from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: deploy-eastus.yml
+          workflow: eshoponweb-cicd.yml
           workflow_conclusion: success
           name: bicep-template               # matches the upload name you already have
           path: bicep-template
