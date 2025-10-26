@@ -145,7 +145,14 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-  
+          
+      - name: Install Bicep CLI
+        uses: Azure/cli@v2
+        with:
+          inlineScript: |
+            az bicep install --upgrade
+            az bicep version
+
           # Validate the Bicep (prints the real error)
       - name: Validate Bicep
         uses: Azure/cli@v2
