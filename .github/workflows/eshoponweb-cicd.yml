@@ -13,184 +13,130 @@ env:
 
 
 jobs:
-  #Build, test and publish .net web project in repository
   buildandtest:
     runs-on: ubuntu-latest
     steps:
-    #checkout the repository
-    - uses: actions/checkout@v4
-    #prepare runner for desired .net version SDK
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.415'
-        
-    - name: Clear NuGet cache
-      run: dotnet nuget locals all --clear
-      
-    - name: Show env (check for TARGETFRAMEWORK env var)
-      run: printenv | sort | grep -i target || true
+      # 1) Checkout
+      - uses: actions/checkout@v4
 
-    - name: Check Web project TFM
-      run: dotnet msbuild src/Web/Web.csproj -getProperty:TargetFramework
-    
-    - name: Check BlazorAdmin project TFM
-      run: dotnet msbuild src/BlazorAdmin/BlazorAdmin.csproj -getProperty:TargetFramework
+      # 2) Setup .NET SDK (matches your global.json)
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.415'
 
-    - name: List solution projects (debug)
-      run: dotnet sln eShopOnWeb.sln list
-    
-    # Remove docker-compose (non-SDK) from CI restore/build to avoid TFM issues
-    - name: Remove docker-compose from solution (CI-only)
-      run: |
-        if dotnet sln eShopOnWeb.sln list | grep -q "docker-compose.dcproj"; then
-          dotnet sln eShopOnWeb.sln remove docker-compose.dcproj
-        fi
-        
-    - name: Check for any TargetFramework set globally
-      run: printenv | sort | grep -i target || true
-    
-    - name: Show any TFM declarations in repo (grep)
-      run: git grep -n "<TargetFramework" || true
-    
-    - name: Echo TFM for each project
-      shell: bash
-      run: |
-        set -e
-        for f in $(git ls-files '*.csproj'); do
-          echo "== $f =="
-          dotnet msbuild "$f" -nologo -getProperty:TargetFramework -getProperty:TargetFrameworks
-        done
-    - name: Show Directory.Build.props
-      run: sed -n '1,120p' Directory.Build.props
-    
-    # Make sure no env var is clobbering TargetFramework
-    - name: Unset TARGETFRAMEWORK if present
-      shell: bash
-      run: |
-        if printenv | grep -q '^TARGETFRAMEWORK='; then
-          echo "TARGETFRAMEWORK env var found; unsetting"
-          unset TARGETFRAMEWORK
-        fi
-        printenv | sort | grep -i target || true
-    
-    # Optional: skip non-SDK projects like docker-compose in CI
-    - name: Remove docker-compose from solution (CI-only)
-      run: |
-        if dotnet sln eShopOnWeb.sln list | grep -q "docker-compose.dcproj"; then
-          dotnet sln eShopOnWeb.sln remove docker-compose.dcproj
-        fi
-    
-    # Verify each project now resolves a non-empty TFM
-    - name: Echo TFM for each project
-      shell: bash
-      run: |
-        set -e
-        for f in $(git ls-files '*.csproj'); do
-          echo "== $f =="
-          dotnet msbuild "$f" -nologo -getProperty:TargetFramework -getProperty:TargetFrameworks
-        done
+      - name: Clear NuGet cache
+        run: dotnet nuget locals all --clear
 
-    - name: Restore
-      run: dotnet restore ./eShopOnWeb.sln
-    #Build/Test/Publish the .net project
-    - name: Build with dotnet
-      run: dotnet build ./eShopOnWeb.sln --configuration Release -p:PublishTrimmed=false
-    
-    - name: Test with dotnet
-      run: dotnet test ./eShopOnWeb.sln --configuration Release -p:PublishTrimmed=false
+      - name: dotnet --info
+        run: dotnet --info
 
-    - name: dotnet publish
-      run: |
-        dotnet publish ./src/Web/Web.csproj -c Release -p:PublishTrimmed=false -o ${{env.DOTNET_ROOT}}/myapp
-        cd ${{env.DOTNET_ROOT}}/myapp
-        zip -r ../app.zip .
+      # (Optional) CI-only removal of non-SDK project from solution to avoid TFM issues
+      - name: Remove docker-compose from solution (CI-only)
+        run: |
+          if dotnet sln eShopOnWeb.sln list | grep -q "docker-compose.dcproj"; then
+            dotnet sln eShopOnWeb.sln remove docker-compose.dcproj
+          fi
 
-    # upload the published website code artifacts
-    - name: Upload artifact for deployment job
-      uses: actions/upload-artifact@v4
-      with:
-        name: .net-app
-        path: ${{env.DOTNET_ROOT}}/app.zip
-        
-    # upload the bicep template as artifacts for next job
-    - name: Upload artifact for deployment job
-      uses: actions/upload-artifact@v4
-      with:
-        name: bicep-template
-        path: ${{ env.TEMPLATE-FILE }}
-        
-  # Use Bicep to deploy infrastructure + Publish webapp 
+      # 3) Restore, Build, Test
+      - name: Restore
+        run: dotnet restore ./eShopOnWeb.sln
+
+      - name: Build with dotnet
+        run: dotnet build ./eShopOnWeb.sln --configuration Release
+
+      - name: Test with dotnet
+        run: dotnet test ./eShopOnWeb.sln --configuration Release --verbosity normal
+
+      # 4) Publish the web app (zip)
+      - name: dotnet publish (zip)
+        run: |
+          dotnet publish ./src/Web/Web.csproj -c Release -o ${{env.DOTNET_ROOT}}/myapp
+          cd ${{env.DOTNET_ROOT}}/myapp
+          zip -r ../app.zip .
+
+      # 5) Upload published site artifact
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: .net-app
+          path: ${{env.DOTNET_ROOT}}/app.zip
+
+      # 6) Build Bicep -> ARM JSON **in build job** (no az login needed)
+      - name: Build Bicep to ARM JSON
+        run: |
+          dotnet tool install -g Bicep.Net.Cli || true
+          ~/.dotnet/tools/bicep --version
+          ~/.dotnet/tools/bicep build "${{ env.TEMPLATE-FILE }}" --out infra/webapp.json
+
+      # 7) Upload ARM template artifact
+      - name: Upload ARM template
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm-template
+          path: infra/webapp.json
+
   deploy:
     runs-on: ubuntu-latest
     needs: buildandtest
     environment:
-      name: 'Development'
+      name: Development
     steps:
-      # 1) Get artifacts from build job
+      # 1) Download artifacts
       - name: Download published app
         uses: actions/download-artifact@v4
         with:
           name: .net-app
           path: .net-app
-  
-      - name: Download bicep template
+
+      - name: Download ARM template
         uses: actions/download-artifact@v4
         with:
-          name: bicep-template
-          path: bicep-template
-  
-      # 2) Login to Azure (must match the subscription in your env vars)
+          name: arm-template
+          path: arm-template
+
+      # 2) Login to Azure
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-          
-      - name: Validate & Deploy Bicep (single step)
+
+      # 3) Validate ARM JSON (no Bicep needed here)
+      - name: Validate ARM template
         uses: azure/cli@v2
         with:
-          azcliversion: 2.77.0
           inlineScript: |
-            set -euxo pipefail
-      
-            echo "Install Bicep CLI and fix PATH"
-            az bicep install --upgrade
-            export PATH="$HOME/.azure/bin:$PATH"
-            az bicep version
-      
-            echo "Build Bicep -> ARM JSON (avoid relying on Bicep in later commands)"
-            az bicep build \
-              --file bicep-template/webapp.bicep \
-              --out  bicep-template/webapp.json
-      
-            echo "Validate deployment"
+            set -e
             az deployment group validate \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
-              --template-file  bicep-template/webapp.json \
+              --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-      
-            echo "Create deployment"
+
+      # 4) Deploy ARM JSON
+      - name: Deploy ARM template
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -e
             az deployment group create \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
               --name eshoponweb-${{ github.run_id }} \
               --mode Incremental \
-              --template-file  bicep-template/webapp.json \
+              --template-file  arm-template/webapp.json \
               --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
 
-
-  
-      # 5) Publish the zip to the created App Service
+      # 5) Deploy the ZIP to App Service
       - name: Publish Website to WebApp
-        uses: Azure/cli@v2
+        uses: azure/cli@v2
         with:
           inlineScript: |
+            set -e
             az webapp deploy \
               --name ${{ env.WEBAPP-NAME }} \
               --resource-group ${{ env.RESOURCE-GROUP }} \
               --src-path .net-app/app.zip \
               --type zip
-
