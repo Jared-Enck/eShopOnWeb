@@ -153,24 +153,24 @@ jobs:
             az bicep install --upgrade
             az bicep version
 
-          # Validate the Bicep (prints the real error)
-      - name: Validate Bicep
+      - name: Validate & Deploy Bicep
         uses: Azure/cli@v2
         with:
           inlineScript: |
+            set -e
+            az version
+            az bicep install --upgrade
             az bicep version
+      
+            # Validate (prints clear error if something's wrong)
             az deployment group validate \
               --subscription ${{ env.SUBSCRIPTION-ID }} \
               --resource-group ${{ env.RESOURCE-GROUP }} \
               --template-file bicep-template/webapp.bicep \
               --parameters webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
-  
-      # Deploy only if validation succeeded
-      - name: Deploy Bicep
-        uses: Azure/cli@v2
-        with:
-          inlineScript: |
+      
+            # Deploy
             az deployment group create \
               --subscription ${{ env.SUBSCRIPTION-ID }} \
               --resource-group ${{ env.RESOURCE-GROUP }} \
@@ -179,6 +179,7 @@ jobs:
               --template-file bicep-template/webapp.bicep \
               --parameters webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
               --only-show-errors -o json
+
   
       # 5) Publish the zip to the created App Service
       - name: Publish Website to WebApp
