@@ -70,15 +70,15 @@ jobs:
       - name: Validate & Deploy ARM JSON
         uses: azure/arm-deploy@v2
         with:
+          scopeLevel: ResourceGroup
           subscriptionId: ${{ env.SUBSCRIPTION-ID }}
           resourceGroupName: ${{ env.RESOURCE-GROUP }}
+          region: ${{ env.LOCATION }}          # required when scopeLevel is ResourceGroup
           template: arm-template/webapp.json
           parameters: |
             webAppName=${{ env.WEBAPP-NAME }}
             location=${{ env.LOCATION }}
           deploymentName: eshoponweb-${{ github.run_id }}
-          failOnStdErr: false
-          additionalArguments: --only-show-errors
 
       # 6) Push the ZIP to the Web App
       - name: Publish Website to WebApp
