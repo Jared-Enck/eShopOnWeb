@@ -15,12 +15,11 @@ jobs:
   buildandtest:
     runs-on: ubuntu-latest
     env:
+      # Scope the .bicep path to THIS job only so deploy never sees it
       TEMPLATE-FILE: infra/webapp.bicep
     steps:
-      # 1) Checkout
       - uses: actions/checkout@v4
 
-      # 2) Setup .NET SDK (matches your global.json)
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -32,45 +31,41 @@ jobs:
       - name: dotnet --info
         run: dotnet --info
 
-      # (Optional) CI-only removal of non-SDK project from solution to avoid TFM issues
+      # Optional: remove non-SDK project from solution to avoid TFM issues in CI
       - name: Remove docker-compose from solution (CI-only)
         run: |
           if dotnet sln eShopOnWeb.sln list | grep -q "docker-compose.dcproj"; then
             dotnet sln eShopOnWeb.sln remove docker-compose.dcproj
           fi
 
-      # 3) Restore, Build, Test
       - name: Restore
         run: dotnet restore ./eShopOnWeb.sln
 
-      - name: Build with dotnet
-        run: dotnet build ./eShopOnWeb.sln --configuration Release
+      - name: Build
+        run: dotnet build ./eShopOnWeb.sln -c Release
 
-      - name: Test with dotnet
-        run: dotnet test ./eShopOnWeb.sln --configuration Release --verbosity normal
+      - name: Test
+        run: dotnet test ./eShopOnWeb.sln -c Release
 
-      # 4) Publish the web app (zip)
-      - name: dotnet publish (zip)
+      - name: Publish web app (zip)
         run: |
           dotnet publish ./src/Web/Web.csproj -c Release -o ${{env.DOTNET_ROOT}}/myapp
           cd ${{env.DOTNET_ROOT}}/myapp
           zip -r ../app.zip .
 
-      # 5) Upload published site artifact
-      - name: Upload artifact for deployment job
+      - name: Upload published app
         uses: actions/upload-artifact@v4
         with:
           name: .net-app
           path: ${{env.DOTNET_ROOT}}/app.zip
 
-      # 6) Build Bicep -> ARM JSON **in build job** (no az login needed)
+      # Compile Bicep -> JSON in the build job (no Azure login needed)
       - name: Build Bicep to ARM JSON
         run: |
           dotnet tool install -g Bicep.Net.Cli || true
           ~/.dotnet/tools/bicep --version
           ~/.dotnet/tools/bicep build "${{ env.TEMPLATE-FILE }}" --out infra/webapp.json
 
-      # 7) Upload ARM template artifact
       - name: Upload ARM template
         uses: actions/upload-artifact@v4
         with:
@@ -88,74 +83,50 @@ jobs:
         with:
           name: .net-app
           path: .net-app
-  
+
       - name: Download ARM template
         uses: actions/download-artifact@v4
         with:
           name: arm-template
           path: arm-template
-  
+
+      # Make sure no step in this job sees a .bicep path via env
+      - name: Clear TEMPLATE-FILE for this job
+        run: echo "TEMPLATE-FILE=" >> $GITHUB_ENV
+
+      # Quick guard & debug (optional)
+      - name: Assert no .bicep references in this job
+        run: |
+          set -e
+          printenv | grep -i '\.bicep' && { echo "ERROR: .bicep leaked into env"; exit 1; } || true
+          grep -R --line-number --include="*.yml" "\.bicep" .github/workflows || true
+          ls -al arm-template
+          head -n 20 arm-template/webapp.json
+          file arm-template/webapp.json
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Guard: no .bicep allowed in this job
-      - name: Assert no .bicep is referenced in this job
-        shell: bash
-        run: |
-          set -e
-          grep -R --line-number --include="*.yml" "\.bicep" .github/workflows || true
-          if printenv | grep -q '\.bicep'; then
-            echo "A .bicep reference found in environment variables. Fix env to use JSON."; exit 1
-          fi
-
-      - name: Debug template path
-        shell: bash
-        run: |
-          set -e
-          ls -al arm-template
-          head -n 30 arm-template/webapp.json
-          file arm-template/webapp.json
-
-      - name: Validate ARM template (JSON)
-        uses: azure/cli@v2
+      # Validate + deploy the JSON with arm-deploy (no Azure CLI container, no Bicep)
+      - name: Validate & Deploy ARM JSON
+        uses: azure/arm-deploy@v2
         with:
-          inlineScript: |
-            set -euo pipefail
-            # install bicep just in case the container tries to use it
-            az bicep install --upgrade || true
-            az deployment group validate \
-              --subscription  "${{ env.SUBSCRIPTION-ID }}" \
-              --resource-group "${{ env.RESOURCE-GROUP }}" \
-              --template-file  arm-template/webapp.json \
-              --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
-              --only-show-errors -o json
+          subscriptionId: ${{ env.SUBSCRIPTION-ID }}
+          resourceGroupName: ${{ env.RESOURCE-GROUP }}
+          template: arm-template/webapp.json
+          parameters: |
+            webAppName=${{ env.WEBAPP-NAME }}
+            location=${{ env.LOCATION }}
+          deploymentName: eshoponweb-${{ github.run_id }}
+          failOnStdErr: false
+          additionalArguments: --only-show-errors
 
-      - name: Deploy ARM template (JSON)
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            az bicep install --upgrade || true
-            az deployment group create \
-              --subscription  "${{ env.SUBSCRIPTION-ID }}" \
-              --resource-group "${{ env.RESOURCE-GROUP }}" \
-              --name eshoponweb-${{ github.run_id }} \
-              --mode Incremental \
-              --template-file  arm-template/webapp.json \
-              --parameters     webAppName='${{ env.WEBAPP-NAME }}' location='${{ env.LOCATION }}' \
-              --only-show-errors -o json
-
+      # Publish the zip to the Web App (no Azure CLI container needed for Bicep)
       - name: Publish Website to WebApp
-        uses: azure/cli@v2
+        uses: Azure/webapps-deploy@v3
         with:
-          inlineScript: |
-            set -euo pipefail
-            az bicep install --upgrade || true
-            az webapp deploy \
-              --name ${{ env.WEBAPP-NAME }} \
-              --resource-group ${{ env.RESOURCE-GROUP }} \
-              --src-path .net-app/app.zip \
-              --type zip
-
+          app-name: ${{ env.WEBAPP-NAME }}
+          package: .net-app/app.zip
+          type: zip
