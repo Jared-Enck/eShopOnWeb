@@ -12,41 +12,46 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # ⬇️ Option B: download artifacts from another workflow's latest successful run
-      # Use the *file name* of your build workflow for best reliability.
+      # --- Get artifacts from the latest successful run of your build workflow ---
+      # Use the *file name* of your build workflow (recommended)
       - name: Download .net-app (zip) from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: eshoponweb-cicd.yml     # <-- OR the exact file name of your build workflow
+          workflow: deploy-eastus.yml      # << update if your build workflow file is named differently
           workflow_conclusion: success
-          name: .net-app                    # <-- must match the upload name in the build workflow
+          name: .net-app                     # must match the upload name in the build workflow
           path: .net-app
           branch: main
 
-      - name: Download ARM template (JSON) from latest successful build
+      - name: Download Bicep artifact from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: eshoponweb-cicd.yml     # <-- same as above
+          workflow: deploy-eastus.yml
           workflow_conclusion: success
-          name: arm-template                 # <-- must match the upload name
-          path: arm-template
+          name: bicep-template               # matches the upload name you already have
+          path: bicep-template
           branch: main
 
-      # (Optional) quick sanity check
-      - name: Verify artifacts
-        run: |
-          ls -al .net-app || true
-          ls -al arm-template || true
-          file arm-template/webapp.json || true
-          head -n 20 arm-template/webapp.json || true
+      # --- Compile Bicep -> ARM JSON without using azure/cli ---
+      - name: Build Bicep -> ARM JSON (no az CLI)
+        uses: docker://mcr.microsoft.com/azure-bicep:latest
+        with:
+          args: >
+            /bin/sh -lc "
+            mkdir -p arm-template &&
+            bicep --version &&
+            bicep build bicep-template/webapp.bicep --out arm-template/webapp.json &&
+            ls -al arm-template &&
+            head -n 20 arm-template/webapp.json
+            "
 
-      # Azure login (same subscription as your env)
+      # --- Azure login ---
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Deploy the JSON (no Bicep, no CLI needed)
+      # --- Validate + deploy the JSON (no Bicep dependency here) ---
       - name: Validate & Deploy ARM JSON
         uses: azure/arm-deploy@v2
         with:
@@ -60,7 +65,7 @@ jobs:
           failOnStdErr: false
           additionalArguments: --only-show-errors
 
-      # Push the ZIP to App Service
+      # --- Push the ZIP to the Web App ---
       - name: Publish Website to WebApp
         uses: Azure/webapps-deploy@v3
         with:
