@@ -99,22 +99,29 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
   
-      # Optional: install bicep anyway (harmless) so even if a .bicep sneaks in, it won't fail.
-      - name: (Optional) Install Bicep
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            az bicep install --upgrade
-            az bicep version
-            
+      # Guard: no .bicep allowed in this job
+      - name: Assert no .bicep is referenced in this job
+        shell: bash
+        run: |
+          set -e
+          grep -R --line-number --include="*.yml" "\.bicep" .github/workflows || true
+          if printenv | grep -q '\.bicep'; then
+            echo "A .bicep reference found in environment variables. Fix env to use JSON."; exit 1
+          fi
+  
       - name: Debug template path
-        run: ls -al arm-template && head -n 20 arm-template/webapp.json
-
+        shell: bash
+        run: |
+          set -e
+          ls -al arm-template
+          head -n 30 arm-template/webapp.json
+          file arm-template/webapp.json
+  
       - name: Validate ARM template (JSON)
         uses: azure/cli@v2
         with:
           inlineScript: |
-            set -e
+            set -euo pipefail
             az deployment group validate \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
@@ -126,7 +133,7 @@ jobs:
         uses: azure/cli@v2
         with:
           inlineScript: |
-            set -e
+            set -euo pipefail
             az deployment group create \
               --subscription  "${{ env.SUBSCRIPTION-ID }}" \
               --resource-group "${{ env.RESOURCE-GROUP }}" \
@@ -140,9 +147,10 @@ jobs:
         uses: azure/cli@v2
         with:
           inlineScript: |
-            set -e
+            set -euo pipefail
             az webapp deploy \
               --name ${{ env.WEBAPP-NAME }} \
               --resource-group ${{ env.RESOURCE-GROUP }} \
               --src-path .net-app/app.zip \
               --type zip
+
