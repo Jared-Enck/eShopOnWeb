@@ -75,22 +75,27 @@ jobs:
           inlineScript: |
             $ErrorActionPreference = "Stop"
       
-            # Explicit SP login using AZURE_CREDENTIALS JSON
+            # Login using AZURE_CREDENTIALS JSON
             $sp = ($env:AZURE_CREDENTIALS | ConvertFrom-Json)
             $sec = ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force
             $cred = New-Object System.Management.Automation.PSCredential($sp.clientId, $sec)
             Connect-AzAccount -ServicePrincipal -Tenant $sp.tenantId -Credential $cred | Out-Null
-      
             Select-AzSubscription -SubscriptionId "${{ env.SUBSCRIPTION-ID }}"
       
-            # Validation
-            Test-AzResourceGroupDeployment `
-              -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
-              -TemplateFile "arm-template/webapp.json" `
-              -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
-              -Verbose
+            try {
+              Test-AzResourceGroupDeployment `
+                -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
+                -TemplateFile "arm-template/webapp.json" `
+                -TemplateParameterObject @{ webAppName = "${{ env.WEBAPP-NAME }}"; location = "${{ env.LOCATION }}" } `
+                -Verbose -ErrorAction Stop
+            } catch {
+              Write-Host "=== RAW ERROR ==="
+              $_ | Format-List -Force
+              Write-Host "=== RESOLVED (Resolve-AzError) ==="
+              Resolve-AzError -Last | Format-List -Force
+              throw
+            }
       
-            # Deployment
             New-AzResourceGroupDeployment `
               -Name "eshoponweb-${{ github.run_id }}" `
               -ResourceGroupName "${{ env.RESOURCE-GROUP }}" `
@@ -100,7 +105,6 @@ jobs:
               -Verbose
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
-
 
       # 6) Push the ZIP to the Web App
       - name: Publish Website to WebApp
