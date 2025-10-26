@@ -12,14 +12,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # --- Get artifacts from the latest successful run of your build workflow ---
-      # Use the *file name* of your build workflow (recommended)
+      # 1) Pull artifacts from the latest successful run of your build workflow
       - name: Download .net-app (zip) from latest successful build
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: eshoponweb-cicd.yml      # << update if your build workflow file is named differently
+          workflow: eshoponweb-cicd.yml         # <-- your build workflow file name
           workflow_conclusion: success
-          name: .net-app                     # must match the upload name in the build workflow
+          name: .net-app                        # <-- must match upload name
           path: .net-app
           branch: main
 
@@ -28,30 +27,45 @@ jobs:
         with:
           workflow: eshoponweb-cicd.yml
           workflow_conclusion: success
-          name: bicep-template               # matches the upload name you already have
+          name: bicep-template                   # <-- must match upload name
           path: bicep-template
           branch: main
 
-      # --- Compile Bicep -> ARM JSON without using azure/cli ---
-      - name: Build Bicep -> ARM JSON (no az CLI)
-        uses: docker://mcr.microsoft.com/azure-bicep:latest
-        with:
-          args: >
-            /bin/sh -lc "
-            mkdir -p arm-template &&
-            bicep --version &&
-            bicep build bicep-template/webapp.bicep --out arm-template/webapp.json &&
-            ls -al arm-template &&
-            head -n 20 arm-template/webapp.json
-            "
+      # (Optional) sanity check
+      - name: Verify artifacts
+        run: |
+          ls -al .net-app || true
+          ls -al bicep-template || true
 
-      # --- Azure login ---
+      # 2) Install standalone Bicep CLI (no az CLI, no Docker)
+      - name: Install Bicep CLI (standalone)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p "$HOME/.local/bin"
+          curl -sSLf -o "$HOME/.local/bin/bicep" \
+            https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x "$HOME/.local/bin/bicep"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bicep --version
+
+      # 3) Build Bicep -> ARM JSON
+      - name: Build Bicep -> ARM JSON
+        shell: bash
+        run: |
+          set -e
+          mkdir -p arm-template
+          bicep build bicep-template/webapp.bicep --out arm-template/webapp.json
+          ls -al arm-template
+          head -n 20 arm-template/webapp.json
+
+      # 4) Azure login
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # --- Validate + deploy the JSON (no Bicep dependency here) ---
+      # 5) Validate + deploy the JSON (no Bicep dependency here)
       - name: Validate & Deploy ARM JSON
         uses: azure/arm-deploy@v2
         with:
@@ -65,7 +79,7 @@ jobs:
           failOnStdErr: false
           additionalArguments: --only-show-errors
 
-      # --- Push the ZIP to the Web App ---
+      # 6) Push the ZIP to the Web App
       - name: Publish Website to WebApp
         uses: Azure/webapps-deploy@v3
         with:
